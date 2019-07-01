@@ -1,6 +1,7 @@
 {- Minimal example of the findPtr space leak debugging
 - technique -}
-{-# LANGUAGE MagicHash, UnboxedTuples, BangPatterns #-}
+{-# LANGUAGE MagicHash, UnboxedTuples, BangPatterns, DeriveGeneric, TypeApplications #-}
+{-# LANGUAGE FlexibleContexts, MonoLocalBinds #-}
 module Main where
 
 import Control.Concurrent
@@ -11,6 +12,13 @@ import GHC.Exts
 import GHC.IO
 import GHC.Int
 import Numeric
+import GHC.Generics
+import Data.Functor.Identity
+
+import Data.Generic.HKD
+import Data.Generic.HKD.Types
+import Data.Barbie
+
 
 {- Compilation options
 
@@ -97,6 +105,34 @@ weakToAddrLong w = deRefWeak w >>= traverse anyToAddrLong
 
 data A = A String deriving Show
 
+data User = User A Int deriving (Generic, Show)
+
+type UserF f = HKD User f
+
+
+mkPtr :: Identity a -> IO (Weak a)
+mkPtr (Identity a) = mkWeakPtr a Nothing
+
+checkPtr :: Weak a -> IO ()
+checkPtr wp = do
+  xr <- deRefWeak wp
+--  print xr
+  maddr <- weakToAddrLong wp
+  print (fmap (\addr -> "0x" ++ showHex (addr - 1) "") maddr)
+
+checkPtrs :: (TraversableB (HKD s), Generic s) => HKD s Weak -> IO ()
+checkPtrs wp = do
+  -- perform a GC before dereferencing the weak pointer so that we know
+  -- whether it is dead or not. This also moves the `y` closure from the
+  -- nursery so we can find it using `findPtr`.
+  print "start"
+  performGC
+  btraverse_ checkPtr wp
+
+mkPtrs :: (TraversableB (HKD s), Construct Identity s, Generic s) => s -> IO (HKD s Weak)
+mkPtrs = btraverse mkPtr . deconstruct @Identity
+
+
 main = do
   -- Stop `x` being floated for simplicity
   v <- readLn
@@ -104,21 +140,15 @@ main = do
   -- In this case, `x` is retained by `y`.
   let x = A v
   let y = id [x,x,x]
+      u = User x 5
   -- Make a weak pointer to `x`, when it is GCd then "gc" will be printed.
   -- You can check whether it is still alive by dereferencing it.
-  wp <- mkWeakPtr x (Just (print "gc"))
-  -- perform a GC before dereferencing the weak pointer so that we know
-  -- whether it is dead or not. This also moves the `y` closure from the
-  -- nursery so we can find it using `findPtr`.
-  performGC
-  print "start"
-  -- Check if `x` is alive.
-  xr <- deRefWeak wp
-  print xr
-  maddr <- weakToAddrLong wp
-  print (fmap (\addr -> "0x" ++ showHex (addr - 1) "") maddr)
-  -- Long pauuse so we can break into `gdb` with Ctrl-C.
+  wps <- mkPtrs (Identity x)
+  checkPtrs wps
+  -- Long pause so we can break into `gdb` with Ctrl-C.
   threadDelay 10000000000
   print "end"
   -- Reference to `y` so it stays alive.
   print y
+  print u
+  print x
