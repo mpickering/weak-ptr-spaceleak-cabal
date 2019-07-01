@@ -1,11 +1,16 @@
 {- Minimal example of the findPtr space leak debugging
 - technique -}
+{-# LANGUAGE MagicHash, UnboxedTuples, BangPatterns #-}
 module Main where
 
 import Control.Concurrent
 import System.Environment
 import System.Mem.Weak
 import System.Mem
+import GHC.Exts
+import GHC.IO
+import GHC.Int
+import Numeric
 
 {- Compilation options
 
@@ -82,7 +87,13 @@ that if we cant GC x until we have gced y. In this case there is no leak as
 `y` is referenced later in the program.
 -}
 
+data Void
 
+anyToAddrLong :: a -> IO Int64
+anyToAddrLong !a = IO (\s -> case anyToAddr# a s of (# s', a' #) -> (# s', I64# (unsafeCoerce# a') #))
+
+weakToAddrLong :: Weak v -> IO (Maybe Int64)
+weakToAddrLong w = deRefWeak w >>= traverse anyToAddrLong
 
 data A = A String deriving Show
 
@@ -104,6 +115,8 @@ main = do
   -- Check if `x` is alive.
   xr <- deRefWeak wp
   print xr
+  maddr <- weakToAddrLong wp
+  print (fmap (\addr -> "0x" ++ showHex addr "") maddr)
   -- Long pauuse so we can break into `gdb` with Ctrl-C.
   threadDelay 10000000000
   print "end"
