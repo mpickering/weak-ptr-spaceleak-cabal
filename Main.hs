@@ -116,7 +116,7 @@ main = do
   xr <- deRefWeak wp
   print xr
   maddr <- weakToAddrLong wp
-  print (fmap (\addr -> "0x" ++ showHex addr "") maddr)
+  print (fmap (\addr -> "0x" ++ showHex (addr - 1) "") maddr)
   -- Long pauuse so we can break into `gdb` with Ctrl-C.
   threadDelay 10000000000
   print "end"
