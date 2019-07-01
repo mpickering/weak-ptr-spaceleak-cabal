@@ -111,7 +111,7 @@ type UserF f = HKD User f
 
 
 mkPtr :: Identity a -> IO (Weak a)
-mkPtr (Identity a) = mkWeakPtr a Nothing
+mkPtr (Identity !a) = mkWeakPtr a (Just (putStrLn "gc"))
 
 checkPtr :: Weak a -> IO ()
 checkPtr wp = do
@@ -143,12 +143,12 @@ main = do
       u = User x 5
   -- Make a weak pointer to `x`, when it is GCd then "gc" will be printed.
   -- You can check whether it is still alive by dereferencing it.
-  wps <- mkPtrs (Identity x)
+  wps <- mkPtrs u
   checkPtrs wps
   -- Long pause so we can break into `gdb` with Ctrl-C.
   threadDelay 10000000000
   print "end"
   -- Reference to `y` so it stays alive.
   print y
-  print u
-  print x
+  --print u
+  --print x
